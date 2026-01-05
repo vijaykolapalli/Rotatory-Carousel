@@ -75,7 +75,9 @@ class CarouselView @JvmOverloads constructor(
             val angle1 = atan2(e1.y - centerY, e1.x - centerX)
             val angle2 = atan2(e2.y - centerY, e2.x - centerX)
             
-            velocity = (angle2 - angle1) * 2 // Multiply for more responsive fling
+            // Use shortest angular distance for velocity calculation
+            val angleDelta = shortestAngleDelta(angle1, angle2)
+            velocity = angleDelta * 2 // Multiply for more responsive fling
             startDeceleration()
             return true
         }
@@ -132,7 +134,8 @@ class CarouselView @JvmOverloads constructor(
         if (itemCount == 0) return -1
         val angleStep = (2 * PI / itemCount).toFloat()
         val normalizedAngle = (currentAngle % (2 * PI)).toFloat()
-        val index = (normalizedAngle / angleStep).toInt() % itemCount
+        // Since currentAngle = -index * angleStep, we have: index = -currentAngle / angleStep
+        val index = Math.round(-normalizedAngle / angleStep).toInt() % itemCount
         return if (index < 0) index + itemCount else index
     }
     
@@ -143,10 +146,12 @@ class CarouselView @JvmOverloads constructor(
         if (itemCount == 0) return
         
         val angleStep = (2 * PI / itemCount).toFloat()
-        val targetAngle = index * angleStep
+        // To center card i: currentAngle + (i * angleStep) = 0
+        // Therefore: currentAngle = -(i * angleStep)
+        val targetAngle = -(index * angleStep)
         
         if (animated) {
-            animateToAngle(targetAngle)
+            animateToAngleShortestPath(targetAngle)
         } else {
             currentAngle = targetAngle
             updateCardPositions()
@@ -224,7 +229,8 @@ class CarouselView @JvmOverloads constructor(
                     val centerY = height / 2f
                     val currentTouchAngle = atan2(event.y - centerY, event.x - centerX)
                     
-                    val deltaAngle = currentTouchAngle - lastTouchAngle
+                    // Use shortest angular distance for smooth wrapping
+                    val deltaAngle = shortestAngleDelta(lastTouchAngle, currentTouchAngle)
                     currentAngle += deltaAngle
                     lastTouchAngle = currentTouchAngle
                     
@@ -270,23 +276,48 @@ class CarouselView @JvmOverloads constructor(
         }
     }
     
+    /**
+     * Calculate shortest angular distance between two angles
+     * Returns the delta that should be added to 'from' to reach 'to' via shortest path
+     */
+    private fun shortestAngleDelta(from: Float, to: Float): Float {
+        val twoPi = (2 * PI).toFloat()
+        var delta = (to - from) % twoPi
+        
+        // Normalize to [-PI, PI]
+        if (delta > PI) {
+            delta -= twoPi
+        } else if (delta < -PI) {
+            delta += twoPi
+        }
+        
+        return delta
+    }
+    
     private fun snapToNearestItemWithCollapse() {
         if (itemCount == 0) return
         
         val angleStep = (2 * PI / itemCount).toFloat()
+        // Find which card index is closest to center (angle = 0)
         val normalizedAngle = currentAngle % (2 * PI).toFloat()
-        val nearestIndex = Math.round(normalizedAngle / angleStep)
-        val targetAngle = nearestIndex * angleStep
+        val nearestIndex = Math.round(-normalizedAngle / angleStep)
+        // To center that card: currentAngle = -(nearestIndex * angleStep)
+        val targetAngle = -(nearestIndex * angleStep)
         
-        // Animate to target angle and collapse spacing simultaneously
-        animateToAngleAndCollapse(targetAngle)
+        // Animate to target angle via shortest path and collapse spacing simultaneously
+        animateToAngleShortestPath(targetAngle)
     }
     
-    private fun animateToAngleAndCollapse(target: Float) {
+    /**
+     * Animate to target angle using shortest path and collapse spacing
+     */
+    private fun animateToAngleShortestPath(target: Float) {
         stopAllAnimations()
         
         val startAngle = currentAngle
-        val endAngle = target
+        // Calculate shortest angular distance
+        val delta = shortestAngleDelta(startAngle, target)
+        val endAngle = startAngle + delta
         
         animator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 400
@@ -294,7 +325,7 @@ class CarouselView @JvmOverloads constructor(
             
             addUpdateListener { animation ->
                 val progress = animation.animatedValue as Float
-                currentAngle = startAngle + (endAngle - startAngle) * progress
+                currentAngle = startAngle + delta * progress
                 updateCardPositions()
             }
             
@@ -327,15 +358,13 @@ class CarouselView @JvmOverloads constructor(
         if (itemCount == 0) return
         
         val angleStep = (2 * PI / itemCount).toFloat()
+        // Find which card index is closest to center (angle = 0)
         val normalizedAngle = currentAngle % (2 * PI).toFloat()
-        val nearestIndex = Math.round(normalizedAngle / angleStep)
-        val targetAngle = nearestIndex * angleStep
+        val nearestIndex = Math.round(-normalizedAngle / angleStep)
+        // To center that card: currentAngle = -(nearestIndex * angleStep)
+        val targetAngle = -(nearestIndex * angleStep)
         
-        animateToAngleAndCollapse(targetAngle)
-    }
-    
-    private fun animateToAngle(target: Float) {
-        animateToAngleAndCollapse(target)
+        animateToAngleShortestPath(targetAngle)
     }
     
     private fun startDeceleration() {
