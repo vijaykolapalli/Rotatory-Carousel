@@ -1,4 +1,4 @@
-package com.example.rotatorycarousel.ui.carousel
+package com.example.rotatorycarousel
 
 import android.animation.ValueAnimator
 import android.content.Context
