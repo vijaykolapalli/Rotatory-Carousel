@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Rotatory Carousel</string>
+    <string name="rotary_item_label">Item %1$d</string>
+</resources>

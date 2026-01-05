@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- AppCompat/MaterialComponents theme required for AppCompatActivity and Material widgets -->
+    <style name="Theme.RotatoryCarousel" parent="Theme.MaterialComponents.DayNight.NoActionBar" />
+</resources>
