@@ -33,12 +33,18 @@ class CarouselView @JvmOverloads constructor(
     // Configuration
     var itemCount = 0
         private set
-    var radius = 600f // Distance from center in pixels
-    var perspective = -0.002f // Perspective effect (-1/500 default like iCarousel)
-    var decelerationRate = 0.95f // How quickly to slow down when flicked
-    var bounces = false // Whether to bounce at edges (for non-wrapped carousels)
-    var wrapEnabled = true // Whether carousel wraps around
-    var snapToItemBoundary = true // Auto-snap to nearest item
+    var radius = 450f // Reduced radius for closer cards when static
+    var perspective = -0.0015f
+    var decelerationRate = 0.95f
+    var bounces = false
+    var wrapEnabled = true
+    var snapToItemBoundary = true
+    
+    // Dynamic spacing
+    private var currentRadius = 450f // Animated radius value
+    private val staticRadius = 450f // Cards closer when static
+    private val movingRadius = 650f // Cards spread out when moving
+    private var radiusAnimator: ValueAnimator? = null
     
     // State
     private var currentAngle = 0f // Current rotation angle in radians
@@ -157,12 +163,12 @@ class CarouselView @JvmOverloads constructor(
         cards.forEachIndexed { index, card ->
             val angle = currentAngle + (index * angleStep)
             
-            // Calculate 3D position
-            val x = (radius * sin(angle)).toFloat()
-            val z = (radius * cos(angle)).toFloat()
+            // Calculate 3D position using currentRadius (animated)
+            val x = (currentRadius * sin(angle)).toFloat()
+            val z = (currentRadius * cos(angle)).toFloat()
             
             // Normalize Z to 0-1 range (0 = back, 1 = front)
-            val normalizedZ = (z + radius) / (2 * radius)
+            val normalizedZ = (z + currentRadius) / (2 * currentRadius)
             
             // Scale: larger at front (1.0), smaller at back (0.6)
             val scale = 0.6f + (normalizedZ * 0.4f) // Range: 0.6 to 1.0
@@ -187,7 +193,7 @@ class CarouselView @JvmOverloads constructor(
                 rotationY = 0f
                 
                 // Elevation for proper Z-ordering
-                elevation = (z + radius) * 2
+                elevation = (z + currentRadius) * 2
             }
         }
         
@@ -202,6 +208,9 @@ class CarouselView @JvmOverloads constructor(
             MotionEvent.ACTION_DOWN -> {
                 stopAllAnimations()
                 isDragging = true
+                
+                // Expand spacing when user starts dragging
+                animateRadius(movingRadius, duration = 200)
                 
                 val centerX = width / 2f
                 val centerY = height / 2f
@@ -226,8 +235,9 @@ class CarouselView @JvmOverloads constructor(
             
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 isDragging = false
-                if (!handled && snapToItemBoundary) {
-                    snapToNearestItem()
+                if (!handled) {
+                    // Snap to nearest item and collapse spacing
+                    snapToNearestItemWithCollapse()
                 }
                 return true
             }
@@ -248,14 +258,68 @@ class CarouselView @JvmOverloads constructor(
             if (event.rawX >= cardX && event.rawX <= cardX + card.width &&
                 event.rawY >= cardY && event.rawY <= cardY + card.height) {
                 
-                // Check if it's the centered item or if we should scroll to it
+                // Always scroll tapped card to center
+                scrollToItem(index, animated = true)
+                
+                // Only trigger click callback if it's already centered
                 val currentIndex = getCurrentItemIndex()
                 if (index == currentIndex) {
                     onItemClickListener?.onItemClick(card, index)
-                } else {
-                    scrollToItem(index, animated = true)
                 }
             }
+        }
+    }
+    
+    private fun snapToNearestItemWithCollapse() {
+        if (itemCount == 0) return
+        
+        val angleStep = (2 * PI / itemCount).toFloat()
+        val normalizedAngle = currentAngle % (2 * PI).toFloat()
+        val nearestIndex = Math.round(normalizedAngle / angleStep)
+        val targetAngle = nearestIndex * angleStep
+        
+        // Animate to target angle and collapse spacing simultaneously
+        animateToAngleAndCollapse(targetAngle)
+    }
+    
+    private fun animateToAngleAndCollapse(target: Float) {
+        stopAllAnimations()
+        
+        val startAngle = currentAngle
+        val endAngle = target
+        
+        animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 400
+            interpolator = DecelerateInterpolator()
+            
+            addUpdateListener { animation ->
+                val progress = animation.animatedValue as Float
+                currentAngle = startAngle + (endAngle - startAngle) * progress
+                updateCardPositions()
+            }
+            
+            start()
+        }
+        
+        // Simultaneously collapse spacing
+        animateRadius(staticRadius, duration = 400)
+    }
+    
+    private fun animateRadius(targetRadius: Float, duration: Long = 300) {
+        radiusAnimator?.cancel()
+        
+        val startRadius = currentRadius
+        
+        radiusAnimator = ValueAnimator.ofFloat(startRadius, targetRadius).apply {
+            this.duration = duration
+            interpolator = DecelerateInterpolator()
+            
+            addUpdateListener { animation ->
+                currentRadius = animation.animatedValue as Float
+                updateCardPositions()
+            }
+            
+            start()
         }
     }
     
@@ -267,32 +331,19 @@ class CarouselView @JvmOverloads constructor(
         val nearestIndex = Math.round(normalizedAngle / angleStep)
         val targetAngle = nearestIndex * angleStep
         
-        animateToAngle(targetAngle)
+        animateToAngleAndCollapse(targetAngle)
     }
     
     private fun animateToAngle(target: Float) {
-        stopAllAnimations()
-        
-        val startAngle = currentAngle
-        val endAngle = target
-        
-        animator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 300
-            interpolator = DecelerateInterpolator()
-            
-            addUpdateListener { animation ->
-                val progress = animation.animatedValue as Float
-                currentAngle = startAngle + (endAngle - startAngle) * progress
-                updateCardPositions()
-            }
-            
-            start()
-        }
+        animateToAngleAndCollapse(target)
     }
     
     private fun startDeceleration() {
         stopAllAnimations()
         isAnimating = true
+        
+        // Expand spacing during fling
+        animateRadius(movingRadius, duration = 150)
         
         post(object : Runnable {
             override fun run() {
@@ -300,7 +351,7 @@ class CarouselView @JvmOverloads constructor(
                     isAnimating = false
                     velocity = 0f
                     if (snapToItemBoundary) {
-                        snapToNearestItem()
+                        snapToNearestItemWithCollapse()
                     }
                     return
                 }
@@ -319,6 +370,7 @@ class CarouselView @JvmOverloads constructor(
         velocity = 0f
         animator?.cancel()
         animator = null
+        radiusAnimator?.cancel()
     }
     
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
